@@ -1,0 +1,121 @@
+# Build patched brcmfmac kernel module for Luxul XWR-3150
+# Target: OpenWrt 21.02.7 / bcm53xx-generic / BCM47094 + BCM4366
+#
+# This branch adds a SIOCDEVPRIVATE ioctl handler to brcmfmac, enabling
+# the Broadcom 'wl' userspace tool for DWDS and advanced WiFi config.
+#
+# Trigger: manual dispatch or push to the patch/workflow files.
+
+name: Build brcmfmac
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - xwr3150-brcmfmac-patch
+    paths:
+      - 'package/kernel/mac80211/patches/brcm/899-*'
+      - '.github/workflows/build-brcmfmac.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            python3-distutils libelf-dev
+
+      - name: Cache dl/ directory
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: openwrt-dl-21.02.7-bcm53xx-${{ hashFiles('package/kernel/mac80211/patches/brcm/899-*') }}
+          restore-keys: |
+            openwrt-dl-21.02.7-bcm53xx-
+
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            staging_dir/toolchain-*
+            staging_dir/host
+            build_dir/toolchain-*
+            build_dir/host
+          key: openwrt-toolchain-21.02.7-bcm53xx-${{ hashFiles('.github/workflows/build-brcmfmac.yml') }}
+
+      - name: Update and install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure for bcm53xx + brcmfmac
+        run: |
+          cat > .config <<'DOTCONFIG'
+          CONFIG_TARGET_bcm53xx=y
+          CONFIG_TARGET_bcm53xx_generic=y
+          CONFIG_TARGET_bcm53xx_generic_DEVICE_luxul_xwr-3150-v1=y
+          CONFIG_PACKAGE_kmod-brcmfmac=m
+          CONFIG_BRCMFMAC_PCIE=y
+          DOTCONFIG
+          make defconfig
+
+      - name: Download sources
+        run: make download -j$(nproc) || make download -j1 V=s
+
+      - name: Build toolchain
+        run: |
+          make -j$(nproc) tools/compile
+          make -j$(nproc) toolchain/compile
+
+      - name: Build kernel
+        run: make -j$(nproc) target/linux/compile V=s 2>&1 | tail -30
+
+      - name: Build mac80211 (brcmfmac)
+        run: |
+          echo "==> Patch applied in-tree at:"
+          ls -la package/kernel/mac80211/patches/brcm/899-*
+          echo "==> Compiling mac80211..."
+          make package/kernel/mac80211/compile V=s -j$(nproc) 2>&1 | tail -100
+
+      - name: Verify brcmf_do_ioctl symbol
+        run: |
+          BRCMFMAC=$(find build_dir/ -name "brcmfmac.ko" -path "*/brcm80211/*" | head -1)
+          if [ -z "$BRCMFMAC" ]; then
+            echo "ERROR: brcmfmac.ko not found"
+            exit 1
+          fi
+          echo "==> Found: ${BRCMFMAC} ($(stat -c%s "${BRCMFMAC}") bytes)"
+          if nm "${BRCMFMAC}" | grep -q "brcmf_do_ioctl"; then
+            echo "==> SUCCESS: brcmf_do_ioctl present"
+            nm "${BRCMFMAC}" | grep brcmf_do_ioctl
+          else
+            echo "==> FAILURE: brcmf_do_ioctl NOT found"
+            exit 1
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p /tmp/artifacts
+          find bin/ -name "*brcmfmac*" -exec cp -v {} /tmp/artifacts/ \;
+          find bin/ -name "*brcmutil*" -exec cp -v {} /tmp/artifacts/ \;
+          find bin/ -name "*cfg80211*" -exec cp -v {} /tmp/artifacts/ \;
+          find bin/ -name "*mac80211*" -exec cp -v {} /tmp/artifacts/ \;
+          find build_dir/ -name "brcmfmac.ko" -path "*/brcm80211/*" -exec cp -v {} /tmp/artifacts/ \;
+          echo "==> Artifacts:"
+          ls -lh /tmp/artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: brcmfmac-patched-21.02.7-bcm53xx
+          path: /tmp/artifacts/
+          retention-days: 90

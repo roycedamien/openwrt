@@ -1,0 +1,94 @@
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -18,6 +18,7 @@
+ #include <brcmu_utils.h>
+ #include <brcmu_wifi.h>
+
++#include <linux/sockios.h>
+ #include "core.h"
+ #include "bus.h"
+ #include "debug.h"
+@@ -78,6 +79,99 @@ char *brcmf_ifname(struct brcmf_if *ifp)
+ 	return "<if_null>";
+ }
+
++/*
++ * Broadcom private ioctl handler for brcmfmac.
++ *
++ * Enables the Broadcom 'wl' userspace tool to communicate with the WiFi
++ * firmware via SIOCDEVPRIVATE. The wl tool sends a 24-byte header describing
++ * the firmware command, direction (get/set), and an optional data buffer.
++ *
++ * This is required for advanced features like DWDS (Dongle WDS) that are
++ * only configurable through the wl tool's private ioctl interface.
++ *
++ * Based on Luxul XWR-3150 v7 factory firmware brcmfmac patches.
++ */
++
++struct brcmf_ioctl {
++	__u32 cmd;		/* firmware command code */
++	void __user *buf;	/* pointer to userspace data buffer */
++	__u32 len;		/* length of data buffer */
++	__u8 set;		/* 0 = get, 1 = set */
++	__u8 pad[3];		/* alignment padding */
++	__u32 used;		/* bytes read (output) */
++	__u32 needed;		/* bytes needed (output) */
++};
++
++static int brcmf_do_ioctl(struct net_device *ndev, struct ifreq *ifr, int cmd)
++{
++	struct brcmf_if *ifp = netdev_priv(ndev);
++	struct brcmf_ioctl ioc;
++	void *kbuf = NULL;
++	s32 ret;
++
++	/* Only handle Broadcom private ioctls */
++	if (cmd != SIOCDEVPRIVATE)
++		return -EOPNOTSUPP;
++
++	/* Require NET_ADMIN capability */
++	if (!capable(CAP_NET_ADMIN))
++		return -EPERM;
++
++	/* Copy the ioctl header from userspace */
++	if (copy_from_user(&ioc, ifr->ifr_data, sizeof(ioc)))
++		return -EFAULT;
++
++	/* If there's a data buffer, copy it from userspace */
++	if (ioc.buf && ioc.len > 0) {
++		kbuf = memdup_user(ioc.buf, ioc.len);
++		if (IS_ERR(kbuf))
++			return PTR_ERR(kbuf);
++	}
++
++	/* Dispatch to firmware: get or set */
++	if (ioc.set)
++		ret = brcmf_fil_cmd_data_set(ifp, ioc.cmd, kbuf, ioc.len);
++	else
++		ret = brcmf_fil_cmd_data_get(ifp, ioc.cmd, kbuf, ioc.len);
++
++	if (ret)
++		goto done;
++
++	/* For get commands, copy result back to userspace */
++	if (!ioc.set && kbuf && ioc.len > 0) {
++		if (copy_to_user(ioc.buf, kbuf, ioc.len))
++			ret = -EFAULT;
++	}
++
++done:
++	kfree(kbuf);
++	return ret;
++}
++
+ struct brcmf_if *brcmf_get_ifp(struct brcmf_pub *drvr, int ifidx)
+ {
+ 	struct brcmf_if *ifp;
+@@ -339,6 +433,7 @@ static const struct net_device_ops brcmf_netdev_ops_pri = {
+ 	.ndo_start_xmit = brcmf_netdev_start_xmit,
+ 	.ndo_set_mac_address = brcmf_netdev_set_mac_address,
+ 	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list,
++	.ndo_do_ioctl = brcmf_do_ioctl,
+ };
+
+ int brcmf_net_attach(struct brcmf_if *ifp, bool rtnl_locked)
