@@ -8,7 +8,7 @@
  #include "core.h"
  #include "bus.h"
  #include "debug.h"
-@@ -78,6 +79,99 @@ char *brcmf_ifname(struct brcmf_if *ifp)
+@@ -78,6 +79,75 @@ char *brcmf_ifname(struct brcmf_if *ifp)
  	return "<if_null>";
  }
 
@@ -84,10 +84,11 @@
  struct brcmf_if *brcmf_get_ifp(struct brcmf_pub *drvr, int ifidx)
  {
  	struct brcmf_if *ifp;
-@@ -339,6 +433,7 @@ static const struct net_device_ops brcmf_netdev_ops_pri = {
+@@ -629,6 +698,7 @@ static const struct net_device_ops brcmf_netdev_ops_pri = {
  	.ndo_start_xmit = brcmf_netdev_start_xmit,
  	.ndo_set_mac_address = brcmf_netdev_set_mac_address,
- 	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list,
+-	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list
++	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list,
 +	.ndo_do_ioctl = brcmf_do_ioctl,
  };
 
