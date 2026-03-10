@@ -62,10 +62,11 @@ jobs:
           cat > .config <<'DOTCONFIG'
           CONFIG_TARGET_bcm53xx=y
           CONFIG_TARGET_bcm53xx_generic=y
-          CONFIG_TARGET_bcm53xx_generic_DEVICE_luxul_xwr-3150-v1=y
+          CONFIG_TARGET_bcm53xx_generic_DEVICE_luxul_xwr-3150=y
           CONFIG_PACKAGE_kmod-brcmfmac=m
           CONFIG_BRCMFMAC_PCIE=y
           DOTCONFIG
+          sed -i 's/^[[:space:]]*//' .config
           make defconfig
 
       - name: Download sources
