@@ -22,7 +22,7 @@
 + * This is required for advanced features like DWDS (Dongle WDS) that are
 + * only configurable through the wl tool's private ioctl interface.
 + *
-+ * Based on Luxul XWR-3150 v7 factory firmware brcmfmac patches.
++ * Based on Broadcom's standard wl ioctl interface.
 + */
 +
 +struct brcmf_ioctl {
